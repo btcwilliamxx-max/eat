@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# 产物 (跑 build_index.py / gen_announce.py 重新生成)
+index.html
+
+# 系统
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 临时 / 调试
+_*.py

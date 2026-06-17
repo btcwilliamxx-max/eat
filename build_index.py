@@ -11,8 +11,10 @@ import os
 import re
 import sys
 import json
+import time
 import argparse
 import datetime
+import webbrowser
 import html as html_lib
 
 
@@ -54,6 +56,7 @@ def parse_announcements(txt_path):
             'group_studio_nick': '',
             'address_full': '',
             'address_short': '',
+            'transfer_short': '',
             'ark_amount': '',
             'order_no': '',
             'currency': 'RMB',
@@ -81,6 +84,12 @@ def parse_announcements(txt_path):
             short = m.group(1)
             rec['address_short'] = short
             rec['address_full'] = short + ' (完整地址见源公告)'
+
+        # 拨款地址 (业绩地址 ≠ 拨款地址 时, 公告里会多一行 "拨款地址:0xXXXXX****xxxxx")
+        # 用于按拨款地址找截图 (因为截图文件名是 tv_address[1] 收款方 = 拨款地址)
+        m = re.search(r'拨款地址[：:]\s*(0x[0-9A-Fa-f]{5})\*+[0-9A-Fa-f]+', ann)
+        if m:
+            rec['transfer_short'] = m.group(1)
 
         # 订单编号
         m = re.search(r'订单编号[：:]\s*([\w\-]+)', ann)
@@ -193,16 +202,24 @@ def build_screenshot_index(shot_root):
 
 
 def find_screenshot(rec, ss_index):
-    """根据一条公告记录找截图(0 匹配/1 匹配/N 匹配)"""
-    # 公告里 address_short 是 0x + 5位(脱敏后),文件名是 8 位收款方
-    short = rec.get('address_short', '')  # 例如 0x019Cd
-    if not short:
+    """根据一条公告记录找截图(0 匹配/1 匹配/N 匹配)
+    优先用 ARK 短地址(业绩地址)找, 找不到降级用拨款地址(transfer_short)
+    """
+    # 候选地址列表: [ARK地址, 拨款地址] (顺序优先)
+    candidates = []
+    for key in ('address_short', 'transfer_short'):
+        v = rec.get(key, '')
+        if v:
+            candidates.append(v)
+
+    if not candidates:
         return []
-    addr5 = (short[2:] if short.startswith('0x') else short).lower()  # 统一小写
-    # 8 位地址前 5 位应该等于 addr5
-    for k, paths in ss_index['by_short_addr'].items():
-        if k.lower().startswith(addr5):
-            return paths
+
+    for short in candidates:
+        addr5 = (short[2:] if short.startswith('0x') else short).lower()  # 统一小写
+        for k, paths in ss_index['by_short_addr'].items():
+            if k.lower().startswith(addr5):
+                return paths
     return []
 
 
@@ -261,7 +278,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
   .copy-btn {{
     background: #0071e3; color: #fff; border: none; border-radius: 5px;
     padding: 5px 10px; font-size: 12px; cursor: pointer;
-    white-space: nowrap; transition: background 0.15s;
+    white-space: nowrap; transition: background-color 0.15s;
+    min-width: 78px; box-sizing: border-box; text-align: center;
   }}
   .copy-btn:hover {{ background: #005bb5; }}
   .copy-btn.copied {{ background: #28a745; }}
@@ -269,9 +287,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     background: linear-gradient(135deg, #ff9500 0%, #ff6b00 100%);
     color: #fff; border: none; border-radius: 5px;
     padding: 5px 10px; font-size: 12px; cursor: pointer;
-    white-space: nowrap; transition: all 0.15s;
+    white-space: nowrap; transition: background-color 0.15s;
     box-shadow: 0 1px 3px rgba(255,107,0,0.4);
     position: relative;
+    min-width: 88px; box-sizing: border-box; text-align: center;
   }}
   .copy-group-btn::before {{
     content: '🏠';
@@ -280,12 +299,47 @@ HTML_TEMPLATE = """<!DOCTYPE html>
   }}
   .copy-group-btn:hover {{
     background: linear-gradient(135deg, #ffaa33 0%, #ff8000 100%);
-    transform: translateY(-1px);
-    box-shadow: 0 2px 6px rgba(255,107,0,0.5);
+    box-shadow: 0 1px 3px rgba(255,107,0,0.4);
   }}
+  .copy-img-btn {{
+    background: #34c759; color: #fff; border: none; border-radius: 5px;
+    padding: 3px 8px; font-size: 11px; cursor: pointer;
+    white-space: nowrap; transition: background-color 0.15s;
+    margin-left: 4px;
+    min-width: 78px; box-sizing: border-box; text-align: center;
+  }}
+  .copy-img-btn:hover {{ background: #248a3d; }}
+  .copy-img-btn.copied {{ background: #1d6f3a; }}
   .copy-group-btn.copied {{
     background: linear-gradient(135deg, #28a745 0%, #1e7e34 100%);
     box-shadow: 0 1px 3px rgba(40,167,69,0.4);
+  }}
+  /* 反馈徽章: 绝对定位, 不撑大按钮 */
+  .copy-badge {{
+    position: absolute;
+    top: -7px; right: -7px;
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    background: #28a745;
+    color: #fff;
+    font-size: 11px; line-height: 18px;
+    text-align: center;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+    pointer-events: none;
+  }}
+  .copy-badge.fail {{ background: #dc3545; }}
+  /* 行激活: 不同按钮 3 种颜色, sticky 到下一行被点 */
+  tr.row-active-yellow td {{
+    background: rgba(255, 200, 0, 0.22) !important;
+  }}
+  tr.row-active-blue td {{
+    background: rgba(0, 113, 227, 0.18) !important;
+  }}
+  tr.row-active-green td {{
+    background: rgba(52, 199, 89, 0.22) !important;
+  }}
+  tr.row-active-yellow, tr.row-active-blue, tr.row-active-green {{
+    box-shadow: inset 0 0 0 2px rgba(0,0,0,0.08);
   }}
 </style>
 </head>
@@ -318,6 +372,44 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 </table>
 
 <script>
+// ===== 行激活管理: 点哪个按钮, 哪一行变半透明色, sticky 到下一行被点 =====
+let activeRow = null;
+let activeColor = null;
+function activateRow(btn, color) {{
+  const tr = btn.closest('tr');
+  if (!tr) return;
+  if (activeRow === tr) return;  // 同一行, 不重复
+  if (activeRow) {{
+    activeRow.classList.remove('row-active-yellow', 'row-active-blue', 'row-active-green');
+  }}
+  tr.classList.add('row-active-' + color);
+  activeRow = tr;
+  activeColor = color;
+}}
+
+// ===== 复制反馈工具: 不用 textContent, 用徽章避免按钮宽度变化 =====
+function showBadge(btn, ok) {{
+  // 删旧徽章
+  const old = btn.querySelector('.copy-badge');
+  if (old) old.remove();
+  // 加新徽章
+  const badge = document.createElement('span');
+  badge.className = 'copy-badge' + (ok ? '' : ' fail');
+  badge.textContent = ok ? '✓' : '✕';
+  btn.appendChild(badge);
+  btn.classList.add('copied');
+  // 同步激活行背景: 按按钮 class 选颜色
+  let color = null;
+  if (btn.classList.contains('copy-group-btn')) color = 'yellow';
+  else if (btn.classList.contains('copy-img-btn')) color = 'green';
+  else if (btn.classList.contains('copy-btn')) color = 'blue';
+  activateRow(btn, color);
+  setTimeout(() => {{
+    badge.remove();
+    btn.classList.remove('copied');
+  }}, 1500);
+}}
+
 const q = document.getElementById('q');
 const tbody = document.getElementById('tbody');
 const stats = document.getElementById('stats');
@@ -345,15 +437,7 @@ document.querySelectorAll('.copy-btn').forEach(btn => {{
     const tr = e.currentTarget.closest('tr');
     if (!tr) return;
     const text = tr.dataset.raw || '';  // dataset 自动反转义 HTML
-    const orig = btn.textContent;
-    const ok = () => {{
-      btn.textContent = '✅ 已复制';
-      btn.classList.add('copied');
-      setTimeout(() => {{
-        btn.textContent = orig;
-        btn.classList.remove('copied');
-      }}, 1500);
-    }};
+    const ok = () => showBadge(btn, true);
     try {{
       if (navigator.clipboard && navigator.clipboard.writeText) {{
         await navigator.clipboard.writeText(text);
@@ -374,9 +458,9 @@ document.querySelectorAll('.copy-btn').forEach(btn => {{
       const success = document.execCommand('copy');
       document.body.removeChild(ta);
       if (success) ok();
-      else btn.textContent = '❌ 复制失败';
+      else showBadge(btn, false);
     }} catch (err) {{
-      btn.textContent = '❌ 复制失败';
+      showBadge(btn, false);
     }}
   }});
 }});
@@ -388,18 +472,10 @@ document.querySelectorAll('.copy-group-btn').forEach(btn => {{
     if (!tr) return;
     const text = tr.dataset.group || '';
     if (!text) {{
-      btn.textContent = '❌ 无内容';
+      showBadge(btn, false);
       return;
     }}
-    const orig = btn.textContent;
-    const ok = () => {{
-      btn.textContent = '✅ 已复制';
-      btn.classList.add('copied');
-      setTimeout(() => {{
-        btn.textContent = orig;
-        btn.classList.remove('copied');
-      }}, 1500);
-    }};
+    const ok = () => showBadge(btn, true);
     try {{
       if (navigator.clipboard && navigator.clipboard.writeText) {{
         await navigator.clipboard.writeText(text);
@@ -419,9 +495,36 @@ document.querySelectorAll('.copy-group-btn').forEach(btn => {{
       const success = document.execCommand('copy');
       document.body.removeChild(ta);
       if (success) ok();
-      else btn.textContent = '❌ 复制失败';
+      else showBadge(btn, false);
     }} catch (err) {{
-      btn.textContent = '❌ 复制失败';
+      showBadge(btn, false);
+    }}
+  }});
+}});
+
+// ===== 复制图片到剪贴板 =====
+document.querySelectorAll('.copy-img-btn').forEach(btn => {{
+  btn.addEventListener('click', async (e) => {{
+    const url = btn.dataset.shot;
+    if (!url) {{
+      showBadge(btn, false);
+      return;
+    }}
+    const ok = () => showBadge(btn, true);
+    const fail = (msg) => showBadge(btn, false);
+    try {{
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const blob = await resp.blob();
+      // navigator.clipboard.write 需要 ClipboardItem (Chrome 76+)
+      if (!window.ClipboardItem) throw new Error('浏览器不支持');
+      await navigator.clipboard.write([
+        new ClipboardItem({{ 'image/png': blob }})
+      ]);
+      ok();
+    }} catch (err) {{
+      console.error('copy img failed:', err);
+      fail(err.message || '需 http 模式');
     }}
   }});
 }});
@@ -437,10 +540,17 @@ def build_html(all_records, ss_index, out_path):
     for i, rec in enumerate(all_records, 1):
         shots = find_screenshot(rec, ss_index)
         if shots:
-            links = ''.join(
-                f'<a class="shot-link have" href="file:///{p.replace(chr(92), "/")}" target="_blank">📎 {os.path.basename(p)}</a>'
-                for p in shots
-            )
+            link_parts = []
+            for p in shots:
+                rel = os.path.relpath(p, os.path.dirname(out_path)) if out_path else p
+                rel = rel.replace(chr(92), '/')
+                fname = os.path.basename(p)
+                # data-shot 存 http 路径 (server 起来后才能用), 用前导 / 让 fetch 走同源
+                link_parts.append(
+                    f'<a class="shot-link have" href="/{rel}" target="_blank">📎 {fname}</a>'
+                    f'<button class="copy-img-btn" type="button" data-shot="/{rel}" title="复制图片到剪贴板">📋复制图</button>'
+                )
+            links = ''.join(link_parts)
         else:
             links = '<span class="shot-link none">未找到</span>'
 
@@ -493,7 +603,7 @@ def build_html(all_records, ss_index, out_path):
 # ============================================================
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('announce_dir', nargs='?', default=r'C:\Users\92071\Desktop\餐补',
+    ap.add_argument('announce_dir', nargs='?', default=r'G:\餐补',
                     help='公告 txt 所在目录')
     ap.add_argument('--shot-dir', default=r'G:\餐补\screenshots',
                     help='截图根目录(含 by_date/)')
@@ -553,12 +663,55 @@ def main():
     build_html(all_records, ss_index, out)
     print(f'HTML 已生成: {out}')
 
-    # 5) 浏览器打开(本地)
+    # 5) 浏览器打开 (用本地 http server, 解决 file:// 下复制图片被禁用的问题)
     try:
-        if os.name == 'nt':
-            os.startfile(out)
-    except Exception:
-        pass
+        import subprocess
+        import socket as _sock
+        from urllib.request import urlopen
+
+        port = 8765
+        # 检查端口是否占用
+        def _port_in_use(p):
+            with _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM) as s:
+                try:
+                    s.bind(('127.0.0.1', p)); return False
+                except OSError:
+                    return True
+
+        # 起 server (后台)
+        server_script = os.path.join(os.path.dirname(os.path.abspath(out)), 'serve.py')
+        if os.path.exists(server_script):
+            if _port_in_use(port):
+                print(f'[*] 端口 {port} 已被占用, 假设 server 已启动')
+            else:
+                # 用 Popen 起后台, 不阻塞当前进程
+                DETACHED_PROCESS = 0x00000008
+                CREATE_NEW_PROCESS_GROUP = 0x00000200
+                subprocess.Popen(
+                    ['python', '-X', 'utf8', server_script, str(port)],
+                    creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+                    close_fds=True,
+                )
+                # 等 server 起来
+                for _ in range(30):
+                    if not _port_in_use(port):
+                        break
+                    time.sleep(0.2)
+                print(f'[OK] server 已起: http://localhost:{port}/index.html')
+            url = f'http://localhost:{port}/index.html'
+            # 强制新标签, 不复用 file:// 旧 tab
+            webbrowser.open_new(url)
+        else:
+            # 没 serve.py 兜底用 file://
+            if os.name == 'nt':
+                os.startfile(out)
+    except Exception as e:
+        # 失败兜底
+        try:
+            if os.name == 'nt':
+                os.startfile(out)
+        except Exception:
+            pass
 
 
 if __name__ == '__main__':

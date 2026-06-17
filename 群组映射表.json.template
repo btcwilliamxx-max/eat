@@ -1,0 +1,8 @@
+# Telegram 群组映射 (自动生成, 请勿手动改后跑 scan_groups.py 覆盖)
+# 用法: gen_announce.py 读这个文件, 把"群-话题"转成 t.me/c/.../... 链接
+#
+# 维护方式:
+#   - 第一次跑: python first_login.py -> python scan_groups.py 生成此文件
+#   - 群名/话题名需要重命名: 直接编辑此文件 (不会被覆盖, scan_groups.py 增量更新)
+#   - 删群/删话题: 直接从此文件删除
+#   - 加新群/新话题: 重新跑 scan_groups.py

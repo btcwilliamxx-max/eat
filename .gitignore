@@ -6,18 +6,25 @@ __pycache__/
 # 产物 (跑 build_index.py / gen_announce.py 重新生成)
 index.html
 
+# 截图和进度 (含真实转账凭证, 不入库)
+screenshots/_inbox/
+screenshots/by_date/
+screenshots/manual_screens/
+screenshots/capture_progress.json
+
+# Telegram 凭据 (绝对不能推)
+.env
+tg_session.txt
+
 # serve.py 日志
 serve_err.log
 serve_out.log
 
-# Telegram session (敏感)
-tg_session.txt
-.env
+# 临时 / 调试
+_*.log
+_*.py
 
 # 系统
 .DS_Store
 Thumbs.db
 desktop.ini
-
-# 临时 / 调试
-_*.py

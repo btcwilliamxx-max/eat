@@ -34,7 +34,7 @@ from pathlib import Path
 
 from telethon import TelegramClient
 from telethon.sessions import StringSession
-from telethon.tl.functions.channels import GetForumTopicsRequest
+from telethon.tl.functions.messages import GetForumTopicsRequest
 from telethon.tl.types import Channel, ForumTopic
 
 
@@ -130,10 +130,17 @@ async def scan():
             existing['chat_id'] = chat_id
             existing['chat_username'] = chat_username
 
+            # 先看 entity.forum, 不是 forum 群直接跳过
+            if not getattr(entity, 'forum', False):
+                existing['topics'] = []
+                mapping[title] = existing
+                print(f'[{i}/{len(group_dialogs)}] {title}: (非 forum), chat_id={chat_id}')
+                continue
+
             try:
-                # 检查是否是 forum (有话题)
+                # 拉论坛话题
                 topics_result = await client(GetForumTopicsRequest(
-                    channel=entity,
+                    peer=entity,
                     offset_date=None,
                     offset_id=0,
                     offset_topic=0,
@@ -141,11 +148,11 @@ async def scan():
                 ))
                 topics = topics_result.topics
                 print(f'[{i}/{len(group_dialogs)}] {title}: {len(topics)} 个话题, chat_id={chat_id}')
-            except Exception:
-                # 不是 forum 或无权限, 跳过话题
+            except Exception as e:
+                # 无权限等错误
                 existing['topics'] = []
                 mapping[title] = existing
-                print(f'[{i}/{len(group_dialogs)}] {title}: (非 forum), chat_id={chat_id}')
+                print(f'[{i}/{len(group_dialogs)}] {title}: (拉话题失败: {type(e).__name__}), chat_id={chat_id}')
                 continue
 
             # 3) 翻页拉所有话题

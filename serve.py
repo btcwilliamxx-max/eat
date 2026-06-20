@@ -62,8 +62,7 @@ def main():
         # 端口被占, 说明已经有一个 server 在跑
         print(f'[*] 端口 {port} 已被占用, 假设 server 已启动')
         print(f'[*] 浏览器访问 http://localhost:{port}/index.html')
-        # 自动打开浏览器
-        webbrowser.open(f'http://localhost:{port}/index.html')
+        # 不自动开 tab, 避免双击 build_index 时开 2 个 tab
         return 0
 
     print(f'  根目录: {ROOT}')
@@ -73,11 +72,7 @@ def main():
     print()
 
     with socketserver.TCPServer(('0.0.0.0', port), Handler) as httpd:
-        # 启动时打开浏览器
-        def open_browser():
-            webbrowser.open(f'http://localhost:{port}/index.html')
-        threading.Timer(0.5, open_browser).start()
-
+        # 不自动开 tab, 由 build_index.py 调用时统一开
         try:
             httpd.serve_forever()
         except KeyboardInterrupt:

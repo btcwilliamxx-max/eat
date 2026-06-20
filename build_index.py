@@ -314,6 +314,18 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     background: linear-gradient(135deg, #28a745 0%, #1e7e34 100%);
     box-shadow: 0 1px 3px rgba(40,167,69,0.4);
   }}
+  /* 跳到群按钮: 紫色, 一键唤起 Telegram 话题 */
+  .tg-link-btn {{
+    background: linear-gradient(135deg, #29b6f6 0%, #0078d4 100%);
+    color: #fff; border: none; border-radius: 5px;
+    padding: 5px 10px; font-size: 12px; cursor: pointer;
+    white-space: nowrap; transition: background-color 0.15s;
+    text-decoration: none; display: inline-block;
+  }}
+  .tg-link-btn:hover {{ background: linear-gradient(135deg, #4ec9f7 0%, #1a8ce0 100%); }}
+  .tg-link-btn.none {{
+    background: #f0f0f3; color: #999; cursor: default;
+  }}
   /* 反馈徽章: 绝对定位, 不撑大按钮 */
   .copy-badge {{
     position: absolute;
@@ -363,6 +375,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
   <th>USDT</th>
   <th>币种</th>
   <th>截图</th>
+  <th>✈️ 跳到群</th>
   <th>操作</th>
 </tr>
 </thead>
@@ -567,6 +580,11 @@ def build_html(all_records, ss_index, out_path):
 
         # data-raw 存完整公告原文(HTML escape 一下,JS 读时 dataset 会自动反转义回原字符串)
         raw_escaped = html_lib.escape(rec.get('raw_text', ''), quote=True)
+        tg_url = rec.get('telegram_url', '')
+        if tg_url:
+            tg_cell = f'<a class="tg-link-btn" href="{tg_url}" target="_blank" title="唤起 Telegram 话题">✈️ 跳到群</a>'
+        else:
+            tg_cell = '<span class="tg-link-btn none">未匹配</span>'
         rows.append(f'''<tr data-search="{html_lib.escape(search_blob)}" data-raw="{raw_escaped}" data-group="{html_lib.escape(rec.get('group_studio_nick', ''), quote=True)}">
   <td>{i}</td>
   <td>{html_lib.escape(rec.get('date_range', ''))}</td>
@@ -576,6 +594,7 @@ def build_html(all_records, ss_index, out_path):
   <td>{html_lib.escape(rec.get('subsidy_usdt', ''))}</td>
   <td>{html_lib.escape(rec.get('currency', ''))}</td>
   <td>{links}</td>
+  <td>{tg_cell}</td>
   <td>
     <div style="display:flex; gap:4px;">
       <button class="copy-btn" type="button">📋 复制</button>
@@ -596,6 +615,107 @@ def build_html(all_records, ss_index, out_path):
     )
     with open(out_path, 'w', encoding='utf-8') as f:
         f.write(html)
+
+
+# ============================================================
+# 3.5 群组映射: 从群组映射表.json 找群 + 话题, 生成 t.me/c/.../... 链接
+# ============================================================
+def load_group_mapping(mapping_path):
+    """加载 群组映射表.json, 返回 {群名前缀: (chat_id, {topic名: topic_id})}"""
+    if not os.path.exists(mapping_path):
+        print(f'[!] 群组映射表不存在: {mapping_path}, 跳到群功能禁用')
+        return {}
+    try:
+        with open(mapping_path, encoding='utf-8') as f:
+            raw = json.load(f)
+    except Exception as e:
+        print(f'[!] 群组映射表加载失败: {e}')
+        return {}
+    # 索引: 群名前缀(到第一个 '-' 前) -> {chat_id, {topic_name: topic_id}}
+    index = {}
+    for chat_title, info in raw.items():
+        topics = info.get('topics', []) or []
+        topic_map = {}
+        for t in topics:
+            name = t.get('name', '').strip()
+            tid = t.get('topic_id')
+            if name and tid is not None:
+                topic_map[name] = tid
+        chat_id = info.get('chat_id')
+        if chat_id is None:
+            continue
+        # 用群名前缀(到 '-') 做 key: 公告 "泰山（幸运）-天泽新社区-孙铭泽"
+        # → 群前缀 "泰山（幸运）", 找 key startswith 前缀
+        prefix = chat_title.split('-')[0].strip()
+        if prefix:
+            index[prefix] = {'chat_id': chat_id, 'topic_map': topic_map, 'chat_title': chat_title}
+    print(f'[OK] 群组映射: {len(index)} 个群前缀')
+    return index
+
+
+def find_telegram_url(group_studio_nick, mapping):
+    """从 '泰山（幸运）-天泽新社区-孙铭泽' 找 (chat_id, topic_id) -> t.me/c/.../... URL
+    返回 None 表示没匹配上
+    匹配策略: 群前缀(去除 emoji/特殊字符) + topic 名都做模糊匹配
+    """
+    if not group_studio_nick or not mapping:
+        return None
+    parts = group_studio_nick.split('-')
+    if len(parts) < 2:
+        return None
+    group_prefix = parts[0].strip()
+    topic_name = parts[1].strip()
+
+    # 标准化群前缀: 去 emoji, 去 "社区", 去 "专属服务群", 去 "(...)" 内容
+    def norm(s):
+        s = re.sub(r'[\U0001F300-\U0001FAFF🏠]', '', s)  # 去除 emoji
+        s = s.replace('专属服务群', '').replace('社区', '').strip()
+        return s
+    np = norm(group_prefix)
+    nt = norm(topic_name)
+
+    # 1) 精确: 群前缀完全等于某个 mapping key 的 normalize
+    info = None
+    matched_key = None
+    for k, v in mapping.items():
+        if norm(k) == np:
+            info = v
+            matched_key = k
+            break
+    # 2) 模糊: contains (优先 longest)
+    if not info:
+        candidates = [(k, v) for k, v in mapping.items() if np in norm(k) or norm(k) in np]
+        if candidates:
+            # 取 norm 长度最长的(最具体)
+            candidates.sort(key=lambda x: -len(norm(x[0])))
+            matched_key, info = candidates[0]
+    if not info:
+        return None
+
+    chat_id = info['chat_id']
+    # topic: 先精确, 再模糊 contains
+    topic_map = info['topic_map']
+    topic_id = None
+    if topic_name in topic_map:
+        topic_id = topic_map[topic_name]
+    else:
+        # 模糊
+        for tn, tid in topic_map.items():
+            if nt in norm(tn) or norm(tn) in nt:
+                topic_id = tid
+                break
+    if topic_id is None:
+        return None
+
+    if str(chat_id).startswith('-100'):
+        link_chat_id = str(chat_id)[4:]
+    else:
+        link_chat_id = str(chat_id)
+    if link_chat_id.lstrip('-').isdigit():
+        url = f'https://t.me/c/{link_chat_id}/{topic_id}'
+    else:
+        url = f'https://t.me/{link_chat_id}/{topic_id}'
+    return url
 
 
 # ============================================================
@@ -652,6 +772,20 @@ def main():
     if len(ss_index['all_files']) > 5:
         print(f'  ... +{len(ss_index["all_files"]) - 5} 张')
     print()
+
+    # 2.5) 加载群组映射
+    mapping_path = os.path.join(args.announce_dir, '群组映射表.json')
+    mapping = load_group_mapping(mapping_path)
+    if mapping:
+        # 给每条 record 算 telegram_url
+        url_matched = 0
+        for r in all_records:
+            url = find_telegram_url(r.get('group_studio_nick', ''), mapping)
+            r['telegram_url'] = url
+            if url:
+                url_matched += 1
+        print(f'已匹配 Telegram 链接: {url_matched} / {len(all_records)} 条')
+        print()
 
     # 3) 统计匹配情况
     matched = sum(1 for r in all_records if find_screenshot(r, ss_index))

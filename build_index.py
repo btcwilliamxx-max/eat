@@ -668,26 +668,62 @@ def find_telegram_url(group_studio_nick, mapping):
 
     # 标准化群前缀: 去 emoji, 去 "社区", 去 "专属服务群", 去 "(...)" 内容
     def norm(s):
-        s = re.sub(r'[\U0001F300-\U0001FAFF🏠]', '', s)  # 去除 emoji
-        s = s.replace('专属服务群', '').replace('社区', '').strip()
+        s = re.sub(r'[\U0001F300-\U0001FAFF🏠]', '', s)  # 去 emoji
+        # 全角括号 → 半角
+        s = s.replace('（', '(').replace('）', ')')
+        s = s.replace('专属服务群', '').replace('专属群', '').replace('社区', '').replace('客服群', '').strip()
+        return s
+    def norm_aggressive(s):
+        """激进 norm: 再去掉括号和括号内容 (用于公告括号不一致时兜底)"""
+        s = norm(s)
+        s = re.sub(r'[\(（][^)\）]*[\)）]', '', s)  # 去括号内容
+        s = s.strip()
         return s
     np = norm(group_prefix)
+    npa = norm_aggressive(group_prefix)
     nt = norm(topic_name)
+    nta = norm_aggressive(topic_name)
 
-    # 1) 精确: 群前缀完全等于某个 mapping key 的 normalize
+    # 0) 手动 alias 白名单 (手输不一致的特殊情况, 优先于模糊匹配)
+    # 0) 手动 alias 白名单 (手输不一致的特殊情况, 优先于模糊匹配)
+    # key: 公告的 group_prefix (normalize 后), value: 映射表里的 group_prefix
+    alias_map = {
+        '得到超亿': '得到（超亿）社区',  # 公告省略括号, 映射表有
+    }
+    alias_key = npa if npa in alias_map else (np if np in alias_map else None)
     info = None
     matched_key = None
-    for k, v in mapping.items():
-        if norm(k) == np:
-            info = v
-            matched_key = k
-            break
+    if alias_key:
+        target = alias_map[alias_key]
+        if target in mapping:
+            info = mapping[target]
+            matched_key = target
+
+    # 1) 精确: 群前缀完全等于某个 mapping key 的 normalize
+    if not info:
+        for k, v in mapping.items():
+            if norm(k) == np:
+                info = v
+                matched_key = k
+                break
+    # 1.5) 激进精确: 去括号内容后再比
+    if not info:
+        for k, v in mapping.items():
+            if norm_aggressive(k) == npa and npa:
+                info = v
+                matched_key = k
+                break
     # 2) 模糊: contains (优先 longest)
     if not info:
         candidates = [(k, v) for k, v in mapping.items() if np in norm(k) or norm(k) in np]
         if candidates:
-            # 取 norm 长度最长的(最具体)
             candidates.sort(key=lambda x: -len(norm(x[0])))
+            matched_key, info = candidates[0]
+    # 2.5) 激进模糊: 去括号内容后 contains
+    if not info and npa:
+        candidates = [(k, v) for k, v in mapping.items() if npa in norm_aggressive(k) or norm_aggressive(k) in npa]
+        if candidates:
+            candidates.sort(key=lambda x: -len(norm_aggressive(x[0])))
             matched_key, info = candidates[0]
     if not info:
         return None
@@ -813,12 +849,39 @@ def main():
                     return True
 
         # 起 server (后台)
-        server_script = os.path.join(os.path.dirname(os.path.abspath(out)), 'serve.py')
-        if os.path.exists(server_script):
+        # 优先起 watchdog (自动重启 + 健康检查)
+        # 如果 watchdog 已在跑 (端口被占), 直接复用
+        server_dir = os.path.dirname(os.path.abspath(out))
+        watchdog_script = os.path.join(server_dir, 'serve_watchdog.py')
+        server_script = os.path.join(server_dir, 'serve.py')
+        if os.path.exists(watchdog_script):
+            if _port_in_use(port):
+                # 端口已被占: 可能是 watchdog 起的, 也可能是直接 serve.py 起的
+                # 都视为 OK, 直接复用, 不再起新的
+                print(f'[*] 端口 {port} 已在用, 直接复用 (serve_watchdog 在保活)')
+            else:
+                # 起 watchdog (它内部会起 serve.py 并监控)
+                DETACHED_PROCESS = 0x00000008
+                CREATE_NEW_PROCESS_GROUP = 0x00000200
+                subprocess.Popen(
+                    ['python', '-X', 'utf8', watchdog_script],
+                    creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+                    close_fds=True,
+                )
+                # 等 server 起来
+                for _ in range(40):
+                    if _port_in_use(port):
+                        break
+                    time.sleep(0.2)
+                print(f'[OK] watchdog 已起: http://localhost:{port}/index.html (保活 + 自动重启)')
+            url = f'http://localhost:{port}/index.html'
+            # 强制新标签, 不复用 file:// 旧 tab
+            webbrowser.open_new(url)
+        elif os.path.exists(server_script):
+            # 没 watchdog, 起 serve.py (单进程, 跑久了会卡)
             if _port_in_use(port):
                 print(f'[*] 端口 {port} 已被占用, 假设 server 已启动')
             else:
-                # 用 Popen 起后台, 不阻塞当前进程
                 DETACHED_PROCESS = 0x00000008
                 CREATE_NEW_PROCESS_GROUP = 0x00000200
                 subprocess.Popen(
@@ -826,14 +889,12 @@ def main():
                     creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
                     close_fds=True,
                 )
-                # 等 server 起来
                 for _ in range(30):
-                    if not _port_in_use(port):
+                    if _port_in_use(port):
                         break
                     time.sleep(0.2)
                 print(f'[OK] server 已起: http://localhost:{port}/index.html')
             url = f'http://localhost:{port}/index.html'
-            # 强制新标签, 不复用 file:// 旧 tab
             webbrowser.open_new(url)
         else:
             # 没 serve.py 兜底用 file://

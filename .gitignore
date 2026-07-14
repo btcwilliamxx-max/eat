@@ -12,6 +12,9 @@ screenshots/by_date/
 screenshots/manual_screens/
 screenshots/capture_progress.json
 
+# 公告原文件 (含真实社区 + 短地址 + 业绩, 不入库)
+达标公告.txt
+
 # Telegram 凭据 (绝对不能推)
 .env
 tg_session.txt
@@ -20,9 +23,17 @@ tg_session.txt
 serve_err.log
 serve_out.log
 
+# watchdog 锁文件
+.watchdog.lock
+
+# 群组映射表 备份 (历史数据, 不入库)
+群组映射表.json.bak_*
+群组映射表.json.prev
+
 # 临时 / 调试
 _*.log
 _*.py
+*_v2.log
 
 # 系统
 .DS_Store

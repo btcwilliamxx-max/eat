@@ -748,9 +748,10 @@ def find_telegram_url(group_studio_nick, mapping):
     else:
         link_chat_id = str(chat_id)
     if link_chat_id.lstrip('-').isdigit():
-        url = f'https://t.me/c/{link_chat_id}/{topic_id}'
+        # 用 telegram.me 而非 t.me: 用户实测 t.me 在当前网络环境无法访问
+        url = f'https://telegram.me/c/{link_chat_id}/{topic_id}'
     else:
-        url = f'https://t.me/{link_chat_id}/{topic_id}'
+        url = f'https://telegram.me/{link_chat_id}/{topic_id}'
     return url
 
 

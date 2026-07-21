@@ -50,7 +50,7 @@ from telethon.errors import FloodWaitError
 # Config (改这里)
 # ============================================================
 # AI白名單群组 (entity.id 正数, 不是 chat_id 的 -100 前缀形式)
-MONITORED_CHAT_IDS = {5526703064}  # AI白名單 (真实群)
+MONITORED_CHAT_IDS = {5374712122}  # 测试群 (Alex-阿奇客服老师以及Alex-阿奇客服老师 02) -- TODO 测完换 5526703064 真实群
 
 # 机器人 username (不带 @)
 BOT_USERNAME = 'addAIloginwhitelistbot'
@@ -61,11 +61,10 @@ REPLY_TEXT = '+'
 # 0x + 40 hex 严格地址匹配
 ADDRESS_PATTERN = re.compile(r'\b0x[0-9a-fA-F]{40}\b')
 
-# 业务触发关键字 (任一命中 + 有 0x 地址才处理)
-# 覆盖: "白名单" "白名單" "开通" "新增" "添加"
-# 不命中: 纯讨论消息 (无关键字) 会被跳过
-TRIGGER_KEYWORDS = ['白名单', '白名單', '开通', '新增', '添加', 'whitelist', 'allowlist']
-KEYWORD_PATTERN = re.compile('|'.join(re.escape(k) for k in TRIGGER_KEYWORDS), re.IGNORECASE)
+# 业务触发链接 (客户发的群消息引用: https://t.me/c/{chat}/{msg})
+# 也兼容 telegram.me (user 浏览器打不开 t.me 时也会用这个)
+# 必须 0x + 这个链接都命中才处理 - 强信号, 排除纯讨论
+LINK_PATTERN = re.compile(r'https?://t(?:elegram)?\.me/c/\d+/\d+', re.IGNORECASE)
 
 # 每条 /a 命令间隔 (秒) - 防 flood wait
 RATE_LIMIT_SECONDS = 3
@@ -138,9 +137,10 @@ async def process_message(event, bot_entity, processed):
     if not addresses:
         return  # 没地址, 跳过
 
-    # 必须命中业务关键字 (白名单/开通 等) - 过滤纯讨论消息
-    if not KEYWORD_PATTERN.search(text):
-        return
+    # 必须有 t.me/c/... 业务链接 (强信号: 客户发的具体群消息引用) - 排除纯讨论
+    links = LINK_PATTERN.findall(text)
+    if not links:
+        return  # 没业务链接, 跳过
 
     # 已被 reply 过 -> 跳过 (避免多技术员重复处理)
     msg = event.message

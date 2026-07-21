@@ -17,7 +17,7 @@ screenshots/capture_progress.json
 
 # Telegram 凭据 (绝对不能推)
 .env
-tg_session.txt
+tg_session*.txt
 
 # serve.py 日志
 serve_err.log
@@ -25,6 +25,10 @@ serve_out.log
 
 # watchdog 锁文件
 .watchdog.lock
+
+# whitelist_bot.py 运行产物 (log + 去重表, 持续增长)
+whitelist_bot.log
+whitelist_processed.json
 
 # 群组映射表 备份 (历史数据, 不入库)
 群组映射表.json.bak_*

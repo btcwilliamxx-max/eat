@@ -50,7 +50,9 @@ from telethon.errors import FloodWaitError
 # Config (改这里)
 # ============================================================
 # AI白名單群组 (entity.id 正数, 不是 chat_id 的 -100 前缀形式)
-MONITORED_CHAT_IDS = {5374712122}  # 测试群 (Alex-阿奇客服老师以及Alex-阿奇客服老师 02) -- TODO 测完换 5526703064 真实群
+# 默认真实群 5526703064 (AI白名單)
+# 可通过 CLI --chat-id 或 env WHITELIST_BOT_CHAT_IDS 覆盖
+DEFAULT_CHAT_IDS = [5526703064]
 
 # 机器人 username (不带 @)
 BOT_USERNAME = 'addAIloginwhitelistbot'
@@ -69,7 +71,7 @@ ADDRESS_PATTERN = re.compile(r'0x[0-9a-fA-F]{40}(?![0-9a-fA-F])')
 # 必须 0x + 这个链接都命中才处理 - 强信号, 排除纯讨论
 LINK_PATTERN = re.compile(r'https?://t(?:elegram)?\.me/c/\d+/\d+', re.IGNORECASE)
 
-# 每条 /a 命令间隔 (秒) - 防 flood wait
+# 每条 /a 命令间隔 (秒) - 现在用多行单条不需要, 保留供回退
 RATE_LIMIT_SECONDS = 3
 
 # 去重 + 日志
@@ -81,6 +83,26 @@ LOG_PATH = Path('whitelist_bot.log')
 # Dry-run 判断: --live flag 或 env var = 1 才真跑
 # ============================================================
 DRY_RUN = ('--live' not in sys.argv) and (os.environ.get('WHITELIST_BOT_LIVE', '0') != '1')
+
+
+def parse_chat_ids():
+    """解析 --chat-id 参数 / env / 默认值
+    优先级: CLI --chat-id > env WHITELIST_BOT_CHAT_IDS > DEFAULT_CHAT_IDS
+    格式: 逗号分隔, 例如 --chat-id 5374712122,5526703064
+    """
+    # 1. CLI --chat-id
+    for i, arg in enumerate(sys.argv):
+        if arg == '--chat-id' and i + 1 < len(sys.argv):
+            return [int(x.strip()) for x in sys.argv[i + 1].split(',') if x.strip()]
+    # 2. env
+    env_val = os.environ.get('WHITELIST_BOT_CHAT_IDS', '')
+    if env_val.strip():
+        return [int(x.strip()) for x in env_val.split(',') if x.strip()]
+    # 3. 默认
+    return list(DEFAULT_CHAT_IDS)
+
+
+MONITORED_CHAT_IDS = set(parse_chat_ids())
 
 
 # ============================================================

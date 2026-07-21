@@ -135,12 +135,15 @@ async def process_message(event, bot_entity, processed):
 
     addresses = ADDRESS_PATTERN.findall(text)
     if not addresses:
-        return  # 没地址, 跳过
+        return  # 没地址, 静默跳过 (群里纯聊天不 log)
 
     # 必须有 t.me/c/... 业务链接 (强信号: 客户发的具体群消息引用) - 排除纯讨论
     links = LINK_PATTERN.findall(text)
     if not links:
-        return  # 没业务链接, 跳过
+        # 有 0x 但无链接 -> log 让 user 知道为什么没处理
+        log(f'  [SKIP] msg {event.message.id} 有 0x 但无 t.me 链接, 跳过')
+        log(f'         text: {text[:120]!r}')
+        return
 
     # 已被 reply 过 -> 跳过 (避免多技术员重复处理)
     msg = event.message

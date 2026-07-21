@@ -59,7 +59,10 @@ BOT_USERNAME = 'addAIloginwhitelistbot'
 REPLY_TEXT = '+'
 
 # 0x + 40 hex 严格地址匹配
-ADDRESS_PATTERN = re.compile(r'\b0x[0-9a-fA-F]{40}\b')
+# 注意: 不能用 \b 在末尾 - Python 3 re 是 Unicode-aware, 汉字也算 word char
+# `0xB0e8...803请` 这种贴汉字的格式, 末尾 \b 不成立
+# 用 negative lookahead 替代: 40 hex 后面必须不是 hex 字符
+ADDRESS_PATTERN = re.compile(r'0x[0-9a-fA-F]{40}(?![0-9a-fA-F])')
 
 # 业务触发链接 (客户发的群消息引用: https://t.me/c/{chat}/{msg})
 # 也兼容 telegram.me (user 浏览器打不开 t.me 时也会用这个)

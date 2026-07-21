@@ -61,6 +61,12 @@ REPLY_TEXT = '+'
 # 0x + 40 hex 严格地址匹配
 ADDRESS_PATTERN = re.compile(r'\b0x[0-9a-fA-F]{40}\b')
 
+# 业务触发关键字 (任一命中 + 有 0x 地址才处理)
+# 覆盖: "白名单" "白名單" "开通" "新增" "添加"
+# 不命中: 纯讨论消息 (无关键字) 会被跳过
+TRIGGER_KEYWORDS = ['白名单', '白名單', '开通', '新增', '添加', 'whitelist', 'allowlist']
+KEYWORD_PATTERN = re.compile('|'.join(re.escape(k) for k in TRIGGER_KEYWORDS), re.IGNORECASE)
+
 # 每条 /a 命令间隔 (秒) - 防 flood wait
 RATE_LIMIT_SECONDS = 3
 
@@ -131,6 +137,17 @@ async def process_message(event, bot_entity, processed):
     addresses = ADDRESS_PATTERN.findall(text)
     if not addresses:
         return  # 没地址, 跳过
+
+    # 必须命中业务关键字 (白名单/开通 等) - 过滤纯讨论消息
+    if not KEYWORD_PATTERN.search(text):
+        return
+
+    # 已被 reply 过 -> 跳过 (避免多技术员重复处理)
+    msg = event.message
+    if hasattr(msg, 'replies') and msg.replies and getattr(msg.replies, 'replies', 0) > 0:
+        reply_count = msg.replies.replies
+        log(f'  [SKIP] msg {msg.id} 已有 {reply_count} 个 reply, 跳过 (可能其他技术员已处理)')
+        return
 
     msg_key = f'{chat.id}:{event.message.id}'
     if msg_key in processed:

@@ -179,23 +179,22 @@ async def process_message(event, bot_entity, processed):
             await event.reply(REPLY_TEXT)
             log(f'  -> replied (重试后) "{REPLY_TEXT}"')
 
-    # 2) 给 bot 发 /a 命令 (每个地址一次)
-    for addr in addresses:
-        cmd = f'/a {addr}'
+    # 2) 给 bot 发 /a 命令 (单条多行消息, 1 个 API call 处理多个地址, 降低风控)
+    if addresses:
+        msg_text = '\n'.join(f'/a {addr}' for addr in addresses)
         if DRY_RUN:
-            log(f'  -> [DRY] send "{cmd}" to @{BOT_USERNAME}')
+            log(f'  -> [DRY] send multi-line ({len(addresses)} addrs) to @{BOT_USERNAME}:')
+            for line in msg_text.splitlines():
+                log(f'         {line}')
         else:
             try:
-                await client.send_message(bot_entity, cmd)
-                log(f'  -> sent "{cmd}"')
+                await client.send_message(bot_entity, msg_text)
+                log(f'  -> sent multi-line ({len(addresses)} addrs) to bot')
             except FloodWaitError as e:
-                log(f'  X Flood wait {e.seconds}s on /a, 自动等待...')
+                log(f'  X Flood wait {e.seconds}s on multi-line /a, 自动等待...')
                 await asyncio.sleep(e.seconds + 1)
-                await client.send_message(bot_entity, cmd)
-                log(f'  -> sent "{cmd}" (重试后)')
-            # 间隔防 flood (包括成功的)
-            if not DRY_RUN:
-                await asyncio.sleep(RATE_LIMIT_SECONDS)
+                await client.send_message(bot_entity, msg_text)
+                log(f'  -> sent multi-line ({len(addresses)} addrs) (重试后)')
 
 
 # ============================================================

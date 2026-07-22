@@ -30,6 +30,10 @@ serve_out.log
 whitelist_bot.log
 whitelist_processed.json
 
+# whitelist_bot_v2.py 运行产物 (V2 独立, 跟 V1 分离)
+whitelist_v2.log
+whitelist_v2_processed.json
+
 # 群组映射表 备份 (历史数据, 不入库)
 群组映射表.json.bak_*
 群组映射表.json.prev

@@ -229,14 +229,15 @@ async def process_message(event, bot_entity, processed, client):
     log(f'       addresses: {addresses} (count={len(addresses)})')
     log(f'       mode: {"DRY-RUN" if DRY_RUN else "LIVE"}')
 
-    # 多地址 (>=2) -> 发多行 /a -> 不 reply
+    # 多地址 (>=2) -> 发多行 /a -> reply "已开" (通用, 客服需要反馈)
+    # (之前设计"不 reply" 但客服看不到反馈, 改 reply 通用文本)
     if len(addresses) >= 2:
         msg_text = '\n'.join(f'/a {addr}' for addr in addresses)
         if DRY_RUN:
             log(f'  -> [DRY] send multi-line ({len(addresses)} addrs) to @{BOT_USERNAME}:')
             for line in msg_text.splitlines():
                 log(f'         {line}')
-            log(f'  -> [DRY] (多地址场景) 不 reply')
+            log(f'  -> [DRY] reply "已开" (多地址场景, 通用)')
         else:
             try:
                 await client.send_message(bot_entity, msg_text)
@@ -246,28 +247,21 @@ async def process_message(event, bot_entity, processed, client):
                 await asyncio.sleep(e.seconds + 1)
                 await client.send_message(bot_entity, msg_text)
                 log(f'  -> sent (重试后)')
-            log(f'  (多地址场景) 不 reply (bot 不区分新/旧)')
+            # reply 通用 "已开" (多地址场景 bot 不区分新/旧)
+            await reply_to_csk(event, '已开', 'multi-addr')
         return
 
-    # 单地址 -> 发 /a -> 等 bot 反馈 -> 根据反馈 reply
+    # 单地址 -> 发 /a (用 Conversation, 只发 1 次) -> 等 bot 反馈 -> 根据反馈 reply
     addr = addresses[0]
     cmd = f'/a {addr}'
 
     if DRY_RUN:
-        log(f'  -> [DRY] send "{cmd}" to @{BOT_USERNAME}')
+        log(f'  -> [DRY] (Conversation 内部发) "{cmd}" to @{BOT_USERNAME}')
         log(f'  -> [DRY] 等 bot 反馈 (timeout {BOT_FEEDBACK_TIMEOUT}s)')
         log(f'  -> [DRY] (假设新加) reply "{REPLY_NEW}"')
         return
 
-    try:
-        await client.send_message(bot_entity, cmd)
-        log(f'  -> sent "{cmd}"')
-    except FloodWaitError as e:
-        log(f'  X Flood wait {e.seconds}s, 自动等待...')
-        await asyncio.sleep(e.seconds + 1)
-        await client.send_message(bot_entity, cmd)
-        log(f'  -> sent (重试后)')
-
+    # 直接用 Conversation (wait_bot_response 内部只发 1 次, 避免重复)
     bot_text = await wait_bot_response(client, bot_entity, cmd)
     if not bot_text:
         log(f'  X bot 反馈 timeout ({BOT_FEEDBACK_TIMEOUT}s) 或无反馈')

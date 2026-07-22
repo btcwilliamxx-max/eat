@@ -66,6 +66,10 @@ REPLY_TEXT = '+'
 # 用 negative lookahead 替代: 40 hex 后面必须不是 hex 字符
 ADDRESS_PATTERN = re.compile(r'0x[0-9a-fA-F]{40}(?![0-9a-fA-F])')
 
+# 预校验: 找所有 0x 候选 (任意长度 hex) - 用于检测地址格式不对 (少几位/多几位)
+# 完整 0x 地址 = 0x + 40 hex = 42 字符
+CANDIDATE_PATTERN = re.compile(r'0x[0-9a-fA-F]+')
+
 # 业务触发链接 (客户发的群消息引用: https://t.me/c/{chat}/{msg})
 # 也兼容 telegram.me (user 浏览器打不开 t.me 时也会用这个)
 # 必须 0x + 这个链接都命中才处理 - 强信号, 排除纯讨论
@@ -158,9 +162,34 @@ async def process_message(event, bot_entity, processed):
     sender = await event.get_sender()
     sender_name = getattr(sender, 'username', None) or getattr(sender, 'first_name', None) or str(getattr(sender, 'id', '?'))
 
-    addresses = ADDRESS_PATTERN.findall(text)
-    if not addresses:
-        return  # 没地址, 静默跳过 (群里纯聊天不 log)
+    # 预校验: 找所有 0x 候选 (任意长度), 分类 valid (40 hex) / invalid (其他)
+    all_candidates = CANDIDATE_PATTERN.findall(text)
+    if not all_candidates:
+        return  # 没 0x, 静默跳过 (群里纯聊天不 log)
+
+    valid_addresses = [c for c in all_candidates if len(c) == 42]   # 0x + 40 hex = 42 字符
+    invalid_candidates = [c for c in all_candidates if len(c) != 42]  # 少几位 / 多几位 / 其他长度
+
+    # 全部 invalid (没 valid) -> 直接 reply "地址不对", 不发 bot, 不走原流程
+    if invalid_candidates and not valid_addresses:
+        log(f'[INVALID] msg {event.message.id} 有 {len(invalid_candidates)} 个无效地址 (缺几位/多几位)')
+        for inv in invalid_candidates:
+            log(f'           invalid: {inv} (hex_len={len(inv)-2})')
+        if DRY_RUN:
+            log(f'  -> [DRY] reply "地址不对" to msg {event.message.id}')
+        else:
+            try:
+                await event.reply('地址不对')
+                log(f'  -> replied "地址不对"')
+            except FloodWaitError as e:
+                log(f'  X Flood wait {e.seconds}s on reply, 自动等待...')
+                await asyncio.sleep(e.seconds + 1)
+                await event.reply('地址不对')
+                log(f'  -> replied "地址不对" (重试后)')
+        return  # 不发 bot, 不走原流程
+
+    # 用 valid 走原流程
+    addresses = valid_addresses
 
     # 必须有 t.me/c/... 业务链接 (强信号: 客户发的具体群消息引用) - 排除纯讨论
     links = LINK_PATTERN.findall(text)
